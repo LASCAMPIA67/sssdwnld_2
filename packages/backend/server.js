@@ -6,15 +6,16 @@ const morgan = require('morgan');
 const YTDlpWrap = require('yt-dlp-wrap').default;
 const path = require('path');
 const fs = require('fs').promises;
-const os = require('os');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 
 // Initialisation de l'application Express
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Initialisation de yt-dlp
-const ytDlpPath = path.join(__dirname, 'yt-dlp');
-const ytDlpWrap = new YTDlpWrap(ytDlpPath);
+// Chemin vers yt-dlp
+const ytDlpPath = '/usr/local/bin/yt-dlp';
 
 // Middleware de sécurité
 app.use(helmet());
@@ -42,19 +43,34 @@ const limiter = rateLimit({
 
 app.use('/api/', limiter);
 
-// Fonction pour télécharger et mettre à jour yt-dlp
-async function updateYtDlp() {
+// Fonction pour installer/mettre à jour yt-dlp
+async function installYtDlp() {
   try {
-    console.log('Vérification et téléchargement de yt-dlp...');
-    await YTDlpWrap.downloadFromGithub(ytDlpPath);
-    console.log('yt-dlp est prêt !');
+    console.log('Vérification de yt-dlp...');
+    
+    // Vérifier si yt-dlp existe
+    try {
+      await execAsync('which yt-dlp');
+      console.log('yt-dlp est déjà installé, mise à jour...');
+      await execAsync('yt-dlp -U');
+    } catch (error) {
+      console.log('Installation de yt-dlp...');
+      // Installer yt-dlp via pip ou directement
+      await execAsync('sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp');
+      await execAsync('sudo chmod a+rx /usr/local/bin/yt-dlp');
+    }
+    
+    // Vérifier la version
+    const { stdout } = await execAsync('yt-dlp --version');
+    console.log(`yt-dlp installé : version ${stdout.trim()}`);
   } catch (error) {
-    console.error('Erreur lors du téléchargement de yt-dlp:', error);
+    console.error('Erreur lors de l\'installation de yt-dlp:', error.message);
+    console.log('Continuons sans mise à jour automatique...');
   }
 }
 
-// Mise à jour de yt-dlp au démarrage
-updateYtDlp();
+// Installation de yt-dlp au démarrage
+installYtDlp();
 
 // Route de santé
 app.get('/api/v1/health', (req, res) => {
@@ -80,18 +96,18 @@ app.post('/api/v1/download', async (req, res) => {
   try {
     console.log(`Traitement de l'URL: ${url}`);
 
-    // Options pour yt-dlp
-    const options = [
-      '-j', // Format JSON pour obtenir les métadonnées
-      '--no-warnings',
-      '--no-playlist',
-      '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      url
-    ];
+    // Utiliser yt-dlp directement via exec pour plus de contrôle
+    const command = `yt-dlp -j --no-warnings --no-playlist "${url}"`;
+    
+    const { stdout, stderr } = await execAsync(command, {
+      maxBuffer: 10 * 1024 * 1024 // 10MB buffer
+    });
 
-    // Récupération des métadonnées
-    const metadata = await ytDlpWrap.execPromise(options);
-    const info = JSON.parse(metadata);
+    if (stderr && !stderr.includes('WARNING')) {
+      console.error('Avertissement yt-dlp:', stderr);
+    }
+
+    const info = JSON.parse(stdout);
 
     // Extraction des formats disponibles
     const formats = info.formats || [];
@@ -156,15 +172,20 @@ app.post('/api/v1/download', async (req, res) => {
     let errorMessage = 'Une erreur est survenue lors du traitement de votre demande';
     let statusCode = 500;
 
-    if (error.message.includes('Unsupported URL')) {
+    const errorString = error.message || error.toString();
+
+    if (errorString.includes('Unsupported URL') || errorString.includes('not a valid URL')) {
       errorMessage = 'URL non supportée. Veuillez vérifier que l\'URL est valide et provient d\'une plateforme supportée.';
       statusCode = 400;
-    } else if (error.message.includes('Video unavailable')) {
+    } else if (errorString.includes('Video unavailable') || errorString.includes('Private video')) {
       errorMessage = 'Vidéo non disponible ou privée.';
       statusCode = 404;
-    } else if (error.message.includes('429')) {
+    } else if (errorString.includes('429') || errorString.includes('Too Many Requests')) {
       errorMessage = 'Trop de requêtes. Veuillez réessayer dans quelques instants.';
       statusCode = 429;
+    } else if (errorString.includes('yt-dlp: not found')) {
+      errorMessage = 'Service temporairement indisponible. Veuillez réessayer dans quelques instants.';
+      console.error('yt-dlp n\'est pas installé!');
     }
 
     res.status(statusCode).json({ 
@@ -175,28 +196,30 @@ app.post('/api/v1/download', async (req, res) => {
   }
 });
 
-// Route pour télécharger directement un format
-app.get('/api/v1/download/direct', async (req, res) => {
-  const { url, format_id } = req.query;
+// Route pour obtenir les formats disponibles
+app.get('/api/v1/formats', async (req, res) => {
+  const { url } = req.query;
 
-  if (!url || !format_id) {
+  if (!url) {
     return res.status(400).json({ 
-      error: 'Paramètres manquants',
-      message: 'URL et format_id sont requis'
+      error: 'URL manquante',
+      message: 'Veuillez fournir une URL en paramètre'
     });
   }
 
   try {
-    // Redirection vers l'URL directe du format
-    // Dans un environnement de production, vous pourriez implémenter
-    // un proxy pour masquer l'URL réelle ou ajouter des fonctionnalités
+    // Lister tous les formats disponibles
+    const command = `yt-dlp -F "${url}"`;
+    const { stdout } = await execAsync(command);
+
     res.json({
-      message: 'Utilisez l\'URL fournie dans les formats pour télécharger directement'
+      success: true,
+      formats: stdout
     });
   } catch (error) {
     res.status(500).json({ 
       error: true,
-      message: 'Erreur lors de la génération du lien de téléchargement'
+      message: 'Erreur lors de la récupération des formats'
     });
   }
 });
