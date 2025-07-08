@@ -1,0 +1,25 @@
+{
+  "name": "sssdwnld_2",
+  "version": "1.0.0",
+  "description": "Service web moderne pour télécharger des vidéos depuis plusieurs plateformes",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev:backend & npm run dev:frontend",
+    "dev:backend": "npm run dev -w backend",
+    "dev:frontend": "npm run dev -w frontend",
+    "build": "npm run build:frontend",
+    "build:frontend": "npm run build -w frontend",
+    "start": "npm run start -w backend",
+    "install:all": "npm install"
+  },
+  "keywords": ["video", "downloader", "youtube", "tiktok", "twitter"],
+  "author": "LASCAMPIA",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  }
+}
