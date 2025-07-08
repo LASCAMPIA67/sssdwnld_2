@@ -46,7 +46,7 @@ app.use('/api/', limiter);
 async function updateYtDlp() {
   try {
     console.log('Vérification et téléchargement de yt-dlp...');
-    await ytDlpWrap.downloadFromGithub(ytDlpPath);
+    await YTDlpWrap.downloadFromGithub(ytDlpPath);
     console.log('yt-dlp est prêt !');
   } catch (error) {
     console.error('Erreur lors du téléchargement de yt-dlp:', error);
