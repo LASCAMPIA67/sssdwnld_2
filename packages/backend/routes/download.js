@@ -1,88 +1,52 @@
+// packages/backend/routes/download.js - CRÉER CE FICHIER
 const express = require('express');
 const router = express.Router();
-const Joi = require('joi');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
-const winston = require('winston');
-
-// Logger
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.json(),
-  transports: [
-    new winston.transports.File({ filename: 'logs/download.log' })
-  ]
-});
-
-// Validation schema
-const downloadSchema = Joi.object({
-  url: Joi.string().uri().required()
-});
-
-// Vérifier si yt-dlp est installé
-async function checkYtDlp() {
-  try {
-    await execAsync('which yt-dlp');
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
 
 // Route principale
-router.post('/', async (req, res, next) => {
+router.post('/', async (req, res) => {
   try {
-    // Validation
-    const { error, value } = downloadSchema.validate(req.body);
-    if (error) {
+    const { url } = req.body;
+
+    if (!url) {
       return res.status(400).json({
         error: true,
-        message: error.details[0].message
+        message: 'URL manquante'
       });
     }
 
-    const { url } = value;
-
-    // Vérifier yt-dlp
-    const hasYtDlp = await checkYtDlp();
-    if (!hasYtDlp) {
-      return res.status(503).json({
-        error: true,
-        message: 'Service temporairement indisponible'
-      });
-    }
-
-    // Log de la requête
-    logger.info('Download request', { 
-      url, 
-      ip: req.ip,
-      userAgent: req.get('user-agent')
-    });
+    console.log(`Traitement de l'URL: ${url}`);
 
     // Commande yt-dlp sécurisée
-    const command = `yt-dlp -j --no-warnings --no-playlist --socket-timeout 30 "${url}"`;
+    const command = `yt-dlp -j --no-warnings --no-playlist "${url}"`;
     
     const { stdout, stderr } = await execAsync(command, {
       maxBuffer: 10 * 1024 * 1024,
       timeout: 30000
     });
 
+    if (stderr && !stderr.includes('WARNING')) {
+      console.error('Avertissement yt-dlp:', stderr);
+    }
+
     const info = JSON.parse(stdout);
 
-    // Filtrage des formats
+    // Extraction des formats disponibles
     const formats = info.formats || [];
     
+    // Filtrage et organisation des formats
     const videoFormats = formats
-      .filter(f => f.vcodec !== 'none' && f.acodec !== 'none' && f.height >= 360)
+      .filter(f => f.vcodec !== 'none' && f.acodec !== 'none')
       .sort((a, b) => {
         if (a.height !== b.height) return (b.height || 0) - (a.height || 0);
         return (b.tbr || 0) - (a.tbr || 0);
       })
-      .slice(0, 6);
+      .slice(0, 5);
 
     const audioFormats = formats
-      .filter(f => f.vcodec === 'none' && f.acodec !== 'none' && f.abr >= 128)
+      .filter(f => f.vcodec === 'none' && f.acodec !== 'none')
       .sort((a, b) => (b.abr || 0) - (a.abr || 0))
       .slice(0, 3);
 
@@ -93,86 +57,65 @@ router.post('/', async (req, res, next) => {
         title: info.title || 'Sans titre',
         duration: info.duration || 0,
         thumbnail: info.thumbnail || null,
-        description: info.description ? info.description.substring(0, 300) : null,
+        description: info.description ? info.description.substring(0, 200) + '...' : null,
         uploader: info.uploader || info.channel || 'Inconnu',
         view_count: info.view_count || 0,
         upload_date: info.upload_date || null,
-        webpage_url: info.webpage_url || url,
-        like_count: info.like_count || 0,
-        dislike_count: info.dislike_count || 0
+        webpage_url: info.webpage_url || url
       },
       formats: {
         video: videoFormats.map(f => ({
           format_id: f.format_id,
-          quality: f.format_note || `${f.height}p` || 'HD',
+          quality: f.format_note || `${f.height}p` || 'Qualité inconnue',
           ext: f.ext,
           filesize: f.filesize || f.filesize_approx || null,
           url: f.url,
           resolution: f.resolution || `${f.width}x${f.height}` || 'N/A',
-         fps: f.fps || null,
-          vcodec: f.vcodec || null,
-          acodec: f.acodec || null,
-          tbr: f.tbr || null
+          fps: f.fps || null,
+          vcodec: f.vcodec,
+          acodec: f.acodec
         })),
         audio: audioFormats.map(f => ({
-                format_id: f.format_id,
-                quality: `${f.abr || 'N/A'}kbps`,
-                ext: f.ext,
-                filesize: f.filesize || f.filesize_approx || null,
-                url: f.url,
-                acodec: f.acodec,
-                abr: f.abr || null
-                }))
-            }
-            };
+          format_id: f.format_id,
+          quality: `${f.abr || 'N/A'}kbps`,
+          ext: f.ext,
+          filesize: f.filesize || f.filesize_approx || null,
+          url: f.url,
+          acodec: f.acodec
+        }))
+      }
+    };
 
-            // Log du succès
-            logger.info('Download success', { 
-            url, 
-            title: info.title,
-            formats: {
-                video: videoFormats.length,
-                audio: audioFormats.length
-            }
-            });
+    res.json(response);
 
-            res.json(response);
+  } catch (error) {
+    console.error('Erreur lors du traitement:', error);
+    
+    let errorMessage = 'Une erreur est survenue lors du traitement de votre demande';
+    let statusCode = 500;
 
-        } catch (error) {
-            logger.error('Download error', { 
-            error: error.message,
-            url: req.body.url 
-            });
-            
-            next(error);
-        }
-        });
+    const errorString = error.message || error.toString();
 
-        // Route pour obtenir les formats disponibles
-        router.get('/formats', async (req, res, next) => {
-        try {
-            const { url } = req.query;
+    if (errorString.includes('Unsupported URL') || errorString.includes('not a valid URL')) {
+      errorMessage = 'URL non supportée. Veuillez vérifier que l\'URL est valide.';
+      statusCode = 400;
+    } else if (errorString.includes('Video unavailable') || errorString.includes('Private video')) {
+      errorMessage = 'Vidéo non disponible ou privée.';
+      statusCode = 404;
+    } else if (errorString.includes('429') || errorString.includes('Too Many Requests')) {
+      errorMessage = 'Trop de requêtes. Veuillez réessayer dans quelques instants.';
+      statusCode = 429;
+    } else if (errorString.includes('yt-dlp') && errorString.includes('not found')) {
+      errorMessage = 'Service temporairement indisponible. Veuillez réessayer.';
+      statusCode = 503;
+    }
 
-            if (!url) {
-            return res.status(400).json({
-                error: true,
-                message: 'URL manquante'
-            });
-            }
+    res.status(statusCode).json({ 
+      error: true,
+      message: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
 
-            const command = `yt-dlp -F --no-warnings "${url}"`;
-            const { stdout } = await execAsync(command, {
-            timeout: 30000
-            });
-
-            res.json({
-            success: true,
-            formats: stdout
-            });
-
-        } catch (error) {
-            next(error);
-        }
-        });
-
-        module.exports = router;
+module.exports = router;
