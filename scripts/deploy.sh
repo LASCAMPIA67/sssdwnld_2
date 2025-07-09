@@ -29,7 +29,7 @@ echo "📦 Mise à jour du système..."
 apt update -qq
 
 echo "🔧 Installation des dépendances..."
-apt install -y git nodejs npm nginx redis-server certbot python3-certbot-nginx
+apt install -y git nodejs nginx redis-server certbot python3-certbot-nginx
 
 echo "📥 Clonage/Mise à jour du repository..."
 if [ -d "$DEPLOY_PATH" ]; then
