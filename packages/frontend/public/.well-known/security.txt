@@ -1,0 +1,4 @@
+Contact: mailto:contact@lascampia67.fr
+Expires: 2025-01-01T00:00:00.000Z
+Preferred-Languages: fr, en
+Canonical: https://sssdwnld.com/.well-known/security.txt
