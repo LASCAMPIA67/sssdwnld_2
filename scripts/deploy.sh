@@ -4,6 +4,10 @@ set -e
 
 echo "🚀 Déploiement de sssdwnld..."
 
+# Ajouter le répertoire au safe.directory de Git
+echo "🔧 Configuration de Git..."
+git config --global --add safe.directory /var/www/sssdwnld_2
+
 # Variables
 REPO_URL="https://github.com/LASCAMPIA67/sssdwnld_2.git"
 DEPLOY_PATH="/var/www/sssdwnld_2"
