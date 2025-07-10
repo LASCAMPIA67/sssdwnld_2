@@ -1,47 +1,62 @@
-name: Deploy to Production
+# .github/workflows/deploy.yml
+
+name: CI/CD - Build and Deploy
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
-  test:
+  build-and-push:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-        
-    - name: Install dependencies
-      run: npm ci
-      
-    - name: Run tests
-      run: npm test --if-present
-      
-    - name: Build frontend
-      run: npm run build
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/sssdwnld:latest
 
   deploy:
-    needs: test
+    needs: build-and-push
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
     steps:
-    - name: Deploy to VPS
-      uses: appleboy/ssh-action@v0.1.5
-      with:
-        host: 147.79.101.66
-        username: root
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        script: |
-          cd /var/www/sssdwnld_2
-          git pull origin main
-          npm install --production
-          npm run build
-          pm2 reload sssdwnld_2-backend
-          pm2 logs --lines 20
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            # Se connecter à Docker Hub
+            echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+            
+            # Pull la dernière image
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/sssdwnld:latest
+            
+            # Arrêter et supprimer l'ancien container s'il existe
+            docker stop sssdwnld_container || true
+            docker rm sssdwnld_container || true
+            
+            # Lancer le nouveau container
+            docker run -d --restart always \
+              -p 3000:3000 \
+              --name sssdwnld_container \
+              ${{ secrets.DOCKERHUB_USERNAME }}/sssdwnld:latest
+              
+            # Nettoyer les anciennes images
+            docker image prune -f

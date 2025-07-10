@@ -2,6 +2,9 @@
 
 "use strict";
 
+// Charger les variables d'environnement le plus tôt possible
+require("dotenv").config({ path: require('path').join(__dirname, '.env') });
+
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -9,83 +12,76 @@ const compression = require("compression");
 const rateLimit = require("express-rate-limit");
 const morgan = require("morgan");
 const path = require("path");
-const fs = require("fs");
-require("dotenv").config();
 
-// === Création du dossier logs si inexistant ===
-const logsDir = path.resolve(__dirname, "../../logs");
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
-}
-const accessLogStream = fs.createWriteStream(path.join(logsDir, "access.log"), { flags: "a" });
+const logger = require("./config/logger"); // NOUVEAU: Logger Winston
+const { errorHandler } = require('./middleware/errorHandler');
 
 // === Initialisation de l'app Express ===
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = process.env.PORT || 3000;
 const ENV = process.env.NODE_ENV || "development";
 
-// === Trust proxy pour gestion X-Forwarded-For correcte ===
+// === Configuration de base ===
 app.set("trust proxy", 1);
-
-// === Sécurité avec helmet ===
-app.use(helmet({
-  contentSecurityPolicy: ENV === "production" ? undefined : false,
-  crossOriginEmbedderPolicy: false, // parfois utile en prod selon ton frontend
-}));
-
-// === Compression GZIP ===
-app.use(compression());
-
-// === CORS Multi-origines dynamique ===
-const corsWhitelist = ENV === "production"
-  ? [
-      "https://sssdwnld.com",
-      "https://www.sssdwnld.com",
-      "http://sssdwnld.com",
-      "http://www.sssdwnld.com"
-    ]
-  : [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173"
-    ];
-
-app.use(cors({
-  origin: (origin, callback) => {
-    // Autorise les requêtes sans origine (ex: mobile, curl)
-    if (!origin) return callback(null, true);
-    if (corsWhitelist.includes(origin)) return callback(null, true);
-    return callback(new Error("CORS: Origin non autorisée"));
-  },
-  credentials: true,
-  optionsSuccessStatus: 200
-}));
-
-// === Logging requêtes HTTP dans access.log ===
-app.use(morgan("combined", { stream: accessLogStream }));
-
-// === Parsing du body ===
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// === Limiteur de rate (API only) ===
+// === Sécurité ===
+// Helmet avec une politique de sécurité de contenu plus robuste
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaults().directives,
+      "script-src": ["'self'", "https://www.googletagmanager.com"],
+    },
+  },
+}));
+app.use(compression());
+
+// Configuration CORS plus sécurisée pour la production
+const corsWhitelist = (process.env.CORS_ORIGIN || "").split(',').filter(Boolean);
+if (ENV === 'development') {
+    corsWhitelist.push("http://localhost:5173", "http://127.0.0.1:5173");
+}
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin || corsWhitelist.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error("CORS: Origine non autorisée par la politique CORS"));
+    }
+  },
+  credentials: true,
+};
+app.use(cors(corsOptions));
+
+
+// === Logging ===
+// Utilise morgan pour les logs HTTP, pipés dans Winston
+app.use(morgan("combined", { stream: logger.stream }));
+
+
+// === Limiteur de requêtes ===
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 min
-  max: 150,
-  standardHeaders: true, // Retourne RateLimit-*
-  legacyHeaders: false,  // Désactive X-RateLimit-*
-  message: { error: true, message: "Trop de requêtes, réessayez plus tard." }
+  windowMs: (process.env.RATE_LIMIT_WINDOW_MIN || 15) * 60 * 1000,
+  max: process.env.RATE_LIMIT_MAX_REQUESTS || 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: true, message: "Trop de requêtes, veuillez réessayer plus tard." }
 });
 app.use("/api/", apiLimiter);
 
-// === Import des routes ===
+
+// === Routes API ===
 const downloadRoutes = require("./routes/download");
 const healthRoutes = require("./routes/health");
 
-// === Routing API ===
 app.use("/api/v1/download", downloadRoutes);
 app.use("/api/v1/health", healthRoutes);
 
-// === Static: Servir le frontend en production ===
+
+// === Servir le frontend en production ===
 if (ENV === "production") {
   const frontendDist = path.resolve(__dirname, "../frontend/dist");
   app.use(express.static(frontendDist));
@@ -94,53 +90,28 @@ if (ENV === "production") {
   });
 }
 
-// === 404 handler API ===
-app.use("/api", (req, res) => {
+// === Gestionnaire de 404 (API seulement) ===
+app.use("/api/*", (req, res) => {
   res.status(404).json({
     error: true,
-    message: `La route ${req.method} ${req.originalUrl} n'existe pas`
+    message: `La route ${req.method} ${req.originalUrl} n'existe pas.`
   });
 });
 
-// === 404 handler pour le reste (hors API, par ex. mauvaise route SPA) ===
-app.use((req, res, next) => {
-  if (ENV === "production") {
-    // Laisse le frontend gérer les 404 SPA
-    const frontendDist = path.resolve(__dirname, "../frontend/dist");
-    return res.sendFile(path.join(frontendDist, "index.html"));
-  }
-  res.status(404).json({
-    error: true,
-    message: `Route ${req.method} ${req.originalUrl} non trouvée`
-  });
-});
 
-// === Gestion centralisée des erreurs ===
-app.use((err, req, res, next) => {
-  // Pour éviter crash sur les erreurs inattendues
-  console.error("Erreur Express:", err);
-  if (err.message && err.message.startsWith("CORS")) {
-    return res.status(403).json({ error: true, message: err.message });
-  }
-  res.status(500).json({
-    error: true,
-    message: "Erreur serveur interne",
-    ...(ENV !== "production" && { details: err.message })
-  });
-});
+// === Gestionnaire d'erreurs centralisé ===
+app.use(errorHandler);
 
 // === Lancement du serveur ===
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`
-╔════════════════════════════════════════╗
-║        sssdwnld API Server            ║
-║        Version: 1.0.0                 ║
-╠════════════════════════════════════════╣
-║  Port: ${PORT.toString().padEnd(32)}║
-║  Environnement: ${ENV.padEnd(20)}║
-╚════════════════════════════════════════╝
-  `);
+    logger.info(`
+    ╔════════════════════════════════════════╗
+    ║        sssdwnld API Server             ║
+    ╠════════════════════════════════════════╣
+    ║  Port: ${PORT}
+    ║  Environnement: ${ENV}
+    ╚════════════════════════════════════════╝
+    `);
 });
 
 module.exports = app;
- f

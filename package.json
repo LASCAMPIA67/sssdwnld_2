@@ -7,19 +7,30 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev:backend & npm run dev:frontend",
-    "dev:backend": "npm run dev -w backend",
-    "dev:frontend": "npm run dev -w frontend",
-    "build": "npm run build:frontend",
-    "build:frontend": "npm run build -w frontend",
-    "start": "npm run start -w backend",
-    "install:all": "npm install"
+    "dev": "npm run dev --workspace=frontend & npm run dev --workspace=backend",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspace=frontend",
+    "start": "npm run start --workspace=backend",
+    "install:all": "npm install",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm test --workspaces --if-present"
   },
-  "keywords": ["video", "downloader", "youtube", "tiktok", "twitter"],
+  "keywords": [
+    "video",
+    "downloader",
+    "youtube",
+    "tiktok",
+    "twitter"
+  ],
   "author": "LASCAMPIA",
   "license": "MIT",
   "engines": {
-    "node": ">=16.0.0",
-    "npm": ">=8.0.0"
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5"
   }
 }
