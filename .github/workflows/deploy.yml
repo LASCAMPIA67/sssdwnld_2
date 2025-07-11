@@ -1,18 +1,70 @@
 # .github/workflows/deploy.yml
-
-name: CI/CD - Build and Deploy
+name: CI/CD Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  DOCKER_IMAGE: sssdwnld
+  NODE_VERSION: '20'
 
 jobs:
-  build-and-push:
+  test:
+    name: Test & Lint
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+        env:
+          CI: true
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: ./packages/backend/coverage
+
+  build:
+    name: Build Docker Image
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate version
+        id: version
+        run: |
+          VERSION=$(date +%Y%m%d)-${{ github.run_number }}-${GITHUB_SHA::8}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -28,35 +80,122 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/sssdwnld:latest
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ steps.version.outputs.version }}
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:buildcache,mode=max
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+
+  security-scan:
+    name: Security Scan
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:latest
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
 
   deploy:
-    needs: build-and-push
+    name: Deploy to Production
+    needs: [build, security-scan]
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    
     steps:
-      - name: Deploy to VPS
-        uses: appleboy/ssh-action@master
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            # Se connecter à Docker Hub
-            echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+            # Variables
+            export DOCKER_IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}"
+            export VERSION="${{ needs.build.outputs.version }}"
             
-            # Pull la dernière image
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/sssdwnld:latest
+            # Se déplacer dans le dossier du projet
+            cd /var/www/sssdwnld_2
             
-            # Arrêter et supprimer l'ancien container s'il existe
-            docker stop sssdwnld_container || true
-            docker rm sssdwnld_container || true
+            # Pull la dernière version du code
+            git pull origin main
             
-            # Lancer le nouveau container
-            docker run -d --restart always \
-              -p 3000:3000 \
-              --name sssdwnld_container \
-              ${{ secrets.DOCKERHUB_USERNAME }}/sssdwnld:latest
-              
+            # Créer le fichier .env s'il n'existe pas
+            if [ ! -f .env ]; then
+              cp .env.example .env
+              echo "⚠️  Fichier .env créé - Configurer les variables!"
+            fi
+            
+            # Pull la nouvelle image
+            docker compose pull app
+            
+            # Backup de la base Redis
+            docker compose exec -T redis redis-cli BGSAVE
+            
+            # Déployer avec zero-downtime
+            docker compose up -d --no-deps --scale app=2 app
+            sleep 10
+            
+            # Vérifier la santé
+            docker compose exec -T app wget --spider --quiet http://localhost:3000/api/v1/health
+            if [ $? -eq 0 ]; then
+              echo "✅ Nouveau container sain"
+              docker compose up -d --no-deps --remove-orphans app
+            else
+              echo "❌ Échec health check - Rollback"
+              docker compose up -d --no-deps app
+              exit 1
+            fi
+            
             # Nettoyer les anciennes images
-            docker image prune -f
+            docker image prune -af --filter "until=24h"
+            
+            # Logs
+            echo "✅ Déploiement réussi - Version: $VERSION"
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            # Vérifier que l'application répond
+            curl -f https://sssdwnld.com/api/v1/health || exit 1
+            echo "✅ Application en ligne et fonctionnelle"
+
+      - name: Notify success
+        if: success()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          text: |
+            ✅ Déploiement réussi !
+            Version: ${{ needs.build.outputs.version }}
+            Commit: ${{ github.sha }}
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+      - name: Notify failure
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          text: |
+            ❌ Échec du déploiement
+            Version: ${{ needs.build.outputs.version }}
+            Commit: ${{ github.sha }}
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
