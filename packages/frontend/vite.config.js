@@ -15,12 +15,17 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    minify: 'terser',
+    terserOptions: {
+      compress: {
+        drop_console: true,
+        drop_debugger: true,
+      },
+    },
     rollupOptions: {
       output: {
         manualChunks: {
-          'vue-vendor': ['vue'],
-          'axios-vendor': ['axios']
+          'vue-vendor': ['vue', 'pinia'],
+          'utils-vendor': ['axios', '@vueuse/core']
         }
       }
     }

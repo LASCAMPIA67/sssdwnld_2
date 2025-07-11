@@ -1,87 +1,19 @@
-<!-- packages/frontend/index.html - REMPLACER TOUT LE FICHIER -->
 <!DOCTYPE html>
 <html lang="fr" class="scroll-smooth">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
-  
-  <!-- SEO Meta Tags -->
-  <title>sssdwnld - Téléchargeur de Vidéos Ultra-Rapide | YouTube, TikTok, Twitter</title>
-  <meta name="description" content="Téléchargez gratuitement des vidéos depuis YouTube, TikTok, Twitter/X, Instagram et 100+ plateformes. Rapide, sécurisé, sans inscription. Créé par LASCAMPIA.">
-  <meta name="keywords" content="télécharger vidéo, youtube downloader, tiktok downloader, twitter video download, instagram video, sssdwnld">
-  <meta name="author" content="LASCAMPIA">
-  
-  <!-- Open Graph -->
-  <meta property="og:title" content="sssdwnld - Téléchargeur de Vidéos Multi-Plateformes">
-  <meta property="og:description" content="Téléchargez facilement vos vidéos préférées depuis 100+ plateformes. Gratuit et sans inscription.">
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://sssdwnld.com">
-  <meta property="og:image" content="https://sssdwnld.com/og-image.png">
-  <meta property="og:locale" content="fr_FR">
-  
-  <!-- Twitter Card -->
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="sssdwnld - Téléchargeur de Vidéos">
-  <meta name="twitter:description" content="Téléchargez des vidéos depuis YouTube, TikTok, Twitter et plus!">
-  <meta name="twitter:image" content="https://sssdwnld.com/twitter-card.png">
-  
-  <!-- PWA -->
-  <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#2563eb">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="sssdwnld">
-  
-  <!-- Icons -->
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>sssdwnld - Téléchargeur Vidéo Rapide et Gratuit</title>
+  <meta name="description" content="Téléchargez gratuitement et rapidement des vidéos depuis YouTube, TikTok, Twitter/X, Instagram et des centaines d'autres sites. Service simple, sécurisé et sans inscription.">
+  <meta name="keywords" content="télécharger vidéo, youtube downloader, tiktok downloader, twitter video download, instagram video, video downloader, sssdwnld">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-  
-  <!-- Preconnect -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://www.google-analytics.com">
-  
-  <!-- Analytics -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-    gtag('config', 'G-XXXXXXXXXX');
-  </script>
-  
-  <!-- Schema.org -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "WebApplication",
-    "name": "sssdwnld",
-    "description": "Téléchargeur de vidéos multi-plateformes",
-    "url": "https://sssdwnld.com",
-    "applicationCategory": "Utility",
-    "operatingSystem": "All",
-    "offers": {
-      "@type": "Offer",
-      "price": "0",
-      "priceCurrency": "EUR"
-    },
-    "author": {
-      "@type": "Person",
-      "name": "LASCAMPIA"
-    }
-  }
-  </script>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#1e3a8a">
 </head>
-<body>
+<body class="bg-gray-50 dark:bg-gray-900 font-sans antialiased">
   <div id="app"></div>
   <script type="module" src="/src/main.js"></script>
-  
-  <!-- Service Worker -->
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js');
-      });
-    }
-  </script>
 </body>
 </html>

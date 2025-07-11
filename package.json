@@ -1,6 +1,6 @@
 {
-  "name": "sssdwnld_2",
-  "version": "1.0.0",
+  "name": "sssdwnld",
+  "version": "2.0.0",
   "description": "Service web moderne pour télécharger des vidéos depuis plusieurs plateformes",
   "private": true,
   "workspaces": [
@@ -8,13 +8,13 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=frontend & npm run dev --workspace=backend",
-    "dev:backend": "npm run dev --workspace=backend",
-    "dev:frontend": "npm run dev --workspace=frontend",
     "build": "npm run build --workspace=frontend",
-    "start": "npm run start --workspace=backend",
-    "install:all": "npm install",
+    "start": "npm start --workspace=backend",
     "lint": "npm run lint --workspaces --if-present",
-    "test": "npm test --workspaces --if-present"
+    "test": "npm test --workspaces --if-present",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down"
   },
   "keywords": [
     "video",
@@ -31,6 +31,7 @@
   },
   "devDependencies": {
     "eslint": "^8.57.0",
+    "eslint-plugin-jest": "^29.0.1",
     "prettier": "^3.2.5"
   }
 }

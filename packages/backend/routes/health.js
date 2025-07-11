@@ -1,31 +1,39 @@
-// packages/backend/routes/health.js - CRÉER CE FICHIER
 const express = require('express');
 const router = express.Router();
-const os = require('os');
+const { redisClient } = require('../middleware/cache');
+const { exec } = require('child_process');
 
 router.get('/', async (req, res) => {
-  const health = {
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    service: 'sssdwnld-api',
-    version: '1.0.0',
+  const healthcheck = {
     uptime: process.uptime(),
-    environment: process.env.NODE_ENV || 'development'
+    timestamp: Date.now(),
+    status: 'ok',
+    checks: {},
   };
 
-  // Vérifier yt-dlp
   try {
-    const { exec } = require('child_process');
-    const { promisify } = require('util');
-    const execAsync = promisify(exec);
-    const { stdout } = await execAsync('yt-dlp --version');
-    health.ytdlp = stdout.trim();
-  } catch (error) {
-    health.ytdlp = 'not installed';
-    health.status = 'degraded';
+    const redisStatus = redisClient.isOpen ? 'ok' : 'error';
+    if(redisStatus === 'ok') await redisClient.ping();
+    healthcheck.checks.redis = redisStatus;
+  } catch (e) {
+    healthcheck.status = 'degraded';
+    healthcheck.checks.redis = 'error';
   }
 
-  res.status(health.status === 'ok' ? 200 : 503).json(health);
+  try {
+    await new Promise((resolve, reject) => {
+        exec('yt-dlp --version', (error, stdout) => {
+            if (error) return reject(error);
+            healthcheck.checks.ytdlp = stdout.trim();
+            resolve();
+        });
+    });
+  } catch (e) {
+    healthcheck.status = 'degraded';
+    healthcheck.checks.ytdlp = 'error';
+  }
+
+  res.status(healthcheck.status === 'ok' ? 200 : 503).json(healthcheck);
 });
 
 module.exports = router;
